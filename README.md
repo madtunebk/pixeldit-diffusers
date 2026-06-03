@@ -139,14 +139,10 @@ pipe.fuse_lora()
 
 ## Qwen Encoder
 
-Qwen3-2B excels at complex world-building, fantasy, and detailed scene prompts.
+> **Work in progress.** Qwen3-2B excels at complex world-building, fantasy, and detailed scene prompts. Projection training and full integration are still being completed.
 
 ```bash
-# Train projection (uses both GPUs)
-python scripts/train_qwen_proj.py --prompts /data/prompts.txt --n 50000 --epochs 3 \
-  --gemma-gpu cuda:0 --qwen-gpu cuda:1
-
-# Generate with Qwen
+# Generate with Qwen (requires trained projection)
 python generate.py --encoder qwen --proj qwen_proj.pt --prompt "your epic prompt"
 ```
 
