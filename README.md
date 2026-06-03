@@ -161,14 +161,13 @@ Three nodes under **PixelDiT** category:
 | Script | Purpose |
 |---|---|
 | `generate.py` | Main generation script |
-| `infer.py` | Advanced inference with LoRA blending |
+| `scripts/upscale_images.py` | RealESRGAN 4× upscale before LoRA precompute |
+| `scripts/precompute_lora_data.py` | Precompute image+caption pairs for LoRA training |
 | `scripts/train_lora.py` | LoRA fine-tuning |
-| `scripts/precompute_lora_data.py` | Precompute image+caption pairs for LoRA |
-| `scripts/download_unsplash.py` | Download images from Pexels |
-| `scripts/download_hf_dataset.py` | Download any HF dataset as image+txt pairs |
-| `scripts/train_qwen_proj.py` | Train Qwen→Gemma projection |
-| `scripts/precompute_proj_embs.py` | Precompute projection embeddings |
-| `scripts/setup_diffusers_pixeldit.py` | Install pipeline into diffusers |
+| `scripts/download_unsplash.py` | Download images from Pexels by search query |
+| `scripts/setup_diffusers_pixeldit.py` | Install pipeline into active venv's diffusers |
+
+See `howto_lora.md` for the full LoRA training walkthrough.
 
 ---
 
