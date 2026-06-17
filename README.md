@@ -69,22 +69,10 @@ python generate.py --scheduler lcm --steps 8 --cfg 2.0 --prompt "your prompt"
 
 ```python
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from diffusers.pipelines.pixeldit import PixelDiTPipeline
+from diffusers import PixelDiTPipeline
 
-tokenizer = AutoTokenizer.from_pretrained("Efficient-Large-Model/gemma-2-2b-it")
-tokenizer.padding_side = "right"
-text_encoder = (
-    AutoModelForCausalLM.from_pretrained("Efficient-Large-Model/gemma-2-2b-it", dtype=torch.bfloat16)
-    .get_decoder().eval()
-)
 
-pipe = PixelDiTPipeline.from_pretrained(
-    "madtune/pixeldit-diffusers",
-    text_encoder=text_encoder,
-    tokenizer=tokenizer,
-    torch_dtype=torch.bfloat16,
-)
+pipe = PixelDiTPipeline.from_pretrained("madtune/pixeldit-diffusers",  torch_dtype=torch.bfloat16)
 pipe.enable_model_cpu_offload()
 
 image = pipe(
@@ -94,6 +82,7 @@ image = pipe(
     num_inference_steps=50,
     guidance_scale=7.5,
 ).images[0]
+
 image.save("out.jpg")
 ```
 
