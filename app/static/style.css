@@ -1,0 +1,92 @@
+/* ── base ─────────────────────────────────────────────────── */
+body, .gradio-container { background: #0e0e12 !important; color: #e8e8f0 !important; font-family: 'Inter', sans-serif; }
+
+/* ── tabs ──────────────────────────────────────────────────── */
+.tab-nav button {
+    background: transparent !important; border: none !important;
+    color: #9090b0 !important; font-weight: 600 !important; font-size: 0.95rem !important;
+    padding: 0.6rem 1.2rem !important; border-radius: 10px 10px 0 0 !important;
+    transition: color 0.15s, background 0.15s !important;
+}
+.tab-nav button.selected {
+    background: #16161e !important; color: #a0ff60 !important;
+    border-bottom: 2px solid #a0ff60 !important;
+}
+
+/* ── panels ────────────────────────────────────────────────── */
+.panel {
+    background: #16161e !important;
+    border: 1px solid #2a2a3a !important;
+    border-radius: 16px !important;
+    padding: 1.2rem !important;
+}
+
+/* ── image areas ────────────────────────────────────────────── */
+.image-box img {
+    max-height: 540px !important;
+    width: 100% !important;
+    object-fit: contain !important;
+    border-radius: 10px !important;
+}
+
+/* ── labels ────────────────────────────────────────────────── */
+label span { color: #a0a0c0 !important; font-size: 0.82rem !important; font-weight: 600 !important; letter-spacing: 0.04em !important; text-transform: uppercase; }
+
+/* ── textboxes ─────────────────────────────────────────────── */
+textarea, input[type="text"], input[type="number"] {
+    background: #1e1e2e !important; border: 1px solid #333350 !important;
+    border-radius: 10px !important; color: #e0e0f0 !important;
+}
+textarea:focus, input:focus { border-color: #7c5cbf !important; box-shadow: 0 0 0 2px #7c5cbf44 !important; }
+
+/* ── sliders ───────────────────────────────────────────────── */
+input[type="range"] { accent-color: #a0ff60; }
+
+/* ── generate button ───────────────────────────────────────── */
+.gen-btn {
+    background: linear-gradient(135deg, #2a7a1e, #4caf28) !important;
+    border: none !important; border-radius: 12px !important;
+    color: #e8ffe0 !important; font-size: 1.05rem !important; font-weight: 700 !important;
+    padding: 0.75rem 1.5rem !important; cursor: pointer !important;
+    transition: opacity 0.2s, transform 0.1s !important;
+    box-shadow: 0 4px 20px #48ff0044 !important;
+}
+.gen-btn:hover  { opacity: 0.9 !important; transform: translateY(-1px) !important; }
+.gen-btn:active { transform: translateY(0) !important; }
+
+/* ── accordion ─────────────────────────────────────────────── */
+.gr-accordion { background: #1a1a26 !important; border: 1px solid #2a2a3a !important; border-radius: 12px !important; }
+.gr-accordion > .label-wrap { color: #9090b0 !important; font-size: 0.85rem !important; font-weight: 600 !important; }
+
+/* ── seed ───────────────────────────────────────────────────── */
+.seed-out input { color: #a0ff60 !important; font-family: monospace !important; font-size: 0.9rem; }
+.seed-row {
+    background: #1e1e2e !important; border: 1px solid #333350 !important;
+    border-radius: 10px !important; padding: 0.4rem 0.75rem !important;
+    align-items: flex-end !important; gap: 0.5rem !important; flex-wrap: nowrap !important;
+}
+.seed-row input[type="number"] { background: transparent !important; border: none !important; box-shadow: none !important; height: 2.5rem !important; }
+.seed-row > div:last-child {
+    flex: 0 0 auto !important;
+    align-self: flex-end !important;
+    display: flex !important;
+    align-items: flex-end !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+/* kill the invisible label placeholder Gradio adds above Button components */
+.seed-row > div:last-child > label,
+.seed-row > div:last-child .label-wrap,
+.seed-row > div:last-child > div > label,
+.seed-row > div:last-child > div > .label-wrap { display: none !important; }
+.dice-btn {
+    background: #1a2a1a !important; border: 1px solid #336633 !important;
+    border-radius: 8px !important; color: #a0ff60 !important;
+    font-size: 1.15rem !important;
+    cursor: pointer !important; transition: background 0.15s, border-color 0.15s !important;
+}
+.dice-btn:hover { background: #253a25 !important; border-color: #60cc40 !important; }
+
+/* ── scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0e0e12; }
+::-webkit-scrollbar-thumb { background: #333350; border-radius: 3px; }

@@ -1,0 +1,194 @@
+<style>
+.green-hero {
+  height: 380px;
+  background: #000;
+  overflow: hidden;
+  position: relative;
+  border-radius: 20px;
+  margin-bottom: 1rem;
+}
+
+.green-hero::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,.88) 0%, rgba(0,0,0,.15) 55%, transparent 100%);
+  z-index: 2; pointer-events: none;
+}
+
+/* ── stars ──────────────────────────────────────────────────── */
+.stars {
+  position: absolute; inset: 0; z-index: 1;
+  background-image:
+    radial-gradient(circle, rgba(80,255,40,.85) 0 1.5px, transparent 3px),
+    radial-gradient(circle, rgba(80,255,40,.45) 0 1px,   transparent 2px);
+  background-size: 160px 140px, 240px 200px;
+  animation: drift 18s linear infinite;
+  filter: blur(.4px);
+}
+
+/* ── cube wrapper ───────────────────────────────────────────── */
+.cube-wrap {
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  perspective: 700px;
+  padding-bottom: 70px;
+}
+
+.cube-scene {
+  width: 130px; height: 130px;
+  transform-style: preserve-3d;
+  animation: spinCube 10s linear infinite;
+}
+
+/* ── six faces ──────────────────────────────────────────────── */
+.face {
+  position: absolute;
+  width: 130px; height: 130px;
+  background: rgba(0, 200, 40, 0.08);
+  border: 1.5px solid rgba(100, 255, 80, 0.55);
+  box-shadow:
+    inset 0 0 18px rgba(80, 255, 40, 0.18),
+    0 0 12px rgba(80, 255, 40, 0.22);
+  backdrop-filter: blur(2px);
+}
+
+/* corner glow dots */
+.face::before {
+  content: "";
+  position: absolute; inset: 6px;
+  border: 1px solid rgba(160, 255, 100, 0.2);
+  border-radius: 2px;
+}
+
+.face.front  { transform: translateZ(65px); }
+.face.back   { transform: rotateY(180deg) translateZ(65px); }
+.face.left   { transform: rotateY(-90deg) translateZ(65px); }
+.face.right  { transform: rotateY( 90deg) translateZ(65px); }
+.face.top    { transform: rotateX( 90deg) translateZ(65px); }
+.face.bottom { transform: rotateX(-90deg) translateZ(65px); }
+
+/* front face gets a bit more glow */
+.face.front {
+  background: rgba(0, 220, 60, 0.13);
+  border-color: rgba(140, 255, 100, 0.75);
+  box-shadow: inset 0 0 28px rgba(80,255,40,.28), 0 0 24px rgba(80,255,40,.4);
+}
+
+/* ── core glow behind the cube ─────────────────────────────── */
+.cube-glow {
+  position: absolute;
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(60,255,30,.35) 0%, transparent 70%);
+  filter: blur(22px);
+  animation: glowPulse 4s ease-in-out infinite;
+  z-index: 0;
+}
+
+/* ── header ─────────────────────────────────────────────────── */
+#app-header {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 3;
+  text-align: center; padding: 1.4rem 1rem 1.2rem;
+}
+
+#app-header h1 {
+  font-size: 2.4rem; font-weight: 800; letter-spacing: -0.5px; margin: 0;
+  background: linear-gradient(135deg, #a0ff60, #e0ff80, #ffffff);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+#app-header .sub  { color: #99cc99; margin: 0.3rem 0 0; font-size: 0.88rem; }
+#app-header .meta { color: #4d7a4d; margin: 0.2rem 0 0; font-size: 0.76rem; }
+#app-header .sub a, #app-header .meta a, #app-header .disclaimer a { color: #80ee80; text-decoration: none; }
+#app-header .sub a:hover, #app-header .meta a:hover, #app-header .disclaimer a:hover { text-decoration: underline; }
+
+#app-header .disclaimer {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem; font-weight: 700; letter-spacing: 0.02em;
+  color: #ffcc00;
+  text-shadow: 0 0 10px rgba(255,200,0,.6);
+  background: rgba(0,0,0,.4);
+  border: 1px solid rgba(255,200,0,.3);
+  border-radius: 8px;
+  padding: 0.3rem 0.8rem;
+  display: inline-block;
+}
+
+/* ── animations ─────────────────────────────────────────────── */
+@keyframes spinCube {
+  0%   { transform: rotateX(18deg) rotateY(0deg); }
+  100% { transform: rotateX(18deg) rotateY(360deg); }
+}
+
+@keyframes glowPulse {
+  0%,100% { opacity: .7; transform: scale(1); }
+  50%     { opacity: 1;  transform: scale(1.15); }
+}
+
+@keyframes drift {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 160px 140px, -240px 200px; }
+}
+</style>
+
+<div class="green-hero">
+  <div class="stars"></div>
+  <div class="cube-wrap">
+    <div class="cube-glow"></div>
+    <div class="cube-scene">
+      <div class="face front"></div>
+      <div class="face back"></div>
+      <div class="face left"></div>
+      <div class="face right"></div>
+      <div class="face top"></div>
+      <div class="face bottom"></div>
+    </div>
+  </div>
+  <div id="app-header">
+    <h1>PixelDiT Studio</h1>
+    <p class="sub">
+      Pixel-space diffusion transformer &nbsp;·&nbsp; txt2img &amp; img2img &nbsp;·&nbsp;
+      <a href="https://huggingface.co/madtune/pixeldit-diffusers" target="_blank">HF Model</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/madtunebk/FourNeuron-PixelDiT" target="_blank">GitHub</a>
+    </p>
+    <p class="meta">
+      Pipeline &amp; app by <a href="https://huggingface.co/madtune" target="_blank">madtune</a>
+    </p>
+    <p class="disclaimer">
+      ⚠️ <strong>PixelDiT-1300M is a model by <a href="https://research.nvidia.com/" target="_blank">NVIDIA Research</a> — we do NOT own it, claim it, or affiliate with NVIDIA in any way.</strong>
+    </p>
+  </div>
+</div>
+
+<style>
+#pxl-lightbox {
+  display: none; position: fixed; inset: 0; z-index: 99999;
+  background: rgba(0,0,0,.92); backdrop-filter: blur(6px);
+  align-items: center; justify-content: center; cursor: zoom-out;
+  animation: lbFadeIn .15s ease;
+}
+#pxl-lightbox.open { display: flex; }
+#pxl-lightbox img {
+  width: auto; height: auto;
+  max-width: 92vw; max-height: 92vh;
+  min-width: min(92vw, 100%);
+  object-fit: contain; border-radius: 10px;
+  box-shadow: 0 0 80px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.06);
+  cursor: default; display: block;
+}
+#pxl-lightbox-close {
+  position: fixed; top: 1.2rem; right: 1.4rem;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+  color: #ccc; font-size: 1.4rem; line-height: 1; border-radius: 8px;
+  padding: 0.3rem 0.65rem; cursor: pointer; transition: background .15s;
+}
+#pxl-lightbox-close:hover { background: rgba(255,255,255,.18); color: #fff; }
+@keyframes lbFadeIn { from { opacity: 0 } to { opacity: 1 } }
+</style>
+
+<div id="pxl-lightbox">
+  <button id="pxl-lightbox-close" onclick="closeLightbox()">✕</button>
+  <img id="pxl-lightbox-img" src="" alt="" onclick="event.stopPropagation()">
+</div>
+

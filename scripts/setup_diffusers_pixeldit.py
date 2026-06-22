@@ -20,16 +20,20 @@ SRC_PIPE = os.path.join(PROJECT_ROOT, "diffusers_patch", "src", "diffusers", "pi
 _PIPELINE_EXPORTS = [
     "PixelDiTPipeline",
     "PixelDiTImg2ImgPipeline",
+    "PixelDiTStyledPipeline",
     "PixelDiTPipelineOutput",
     "PixelDiTModel",
+    "PixelDiTControlNet",
+    "ControlNetHED_Apache2",
+    "HEDExtractor",
     "PixelDiTJointAttnProcessor",
     "QwenEncoder",
 ]
 
 # Names added to the top-level diffusers/__init__.py, split by kind so we
 # anchor each next to an existing name of the same kind.
-_TOP_LEVEL_MODELS    = ["PixelDiTModel"]                             # anchor: FluxTransformer2DModel
-_TOP_LEVEL_PIPELINES = ["PixelDiTPipeline", "PixelDiTImg2ImgPipeline"]  # anchor: DiTPipeline
+_TOP_LEVEL_MODELS    = ["PixelDiTModel", "PixelDiTControlNet"]                                        # anchor: FluxTransformer2DModel
+_TOP_LEVEL_PIPELINES = ["PixelDiTPipeline", "PixelDiTImg2ImgPipeline", "PixelDiTStyledPipeline"]      # anchor: DiTPipeline
 
 
 def get_diffusers_path():
