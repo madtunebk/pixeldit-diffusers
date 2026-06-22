@@ -32,6 +32,9 @@ from tqdm import tqdm
 # ---- Flow schedule (matching NVIDIA's training config) ----------------------
 
 _T = 1000
+_TXT_MAX = 300
+_GEMMA_ID = "Efficient-Large-Model/gemma-2-2b-it"
+_SELECT_IDX = [0] + list(range(-(_TXT_MAX - 1), 0))
 
 def _build_flow_schedule(flow_shift: float):
     # sigmas[t] ≈ shift * (t/1000) / (1 + (shift-1) * (t/1000))
@@ -67,6 +70,15 @@ class LoraDataset(Dataset):
         self.imgs  = np.load(os.path.join(data_dir, "lora_images.npy"), mmap_mode="r")
         self.embs  = np.load(os.path.join(data_dir, "lora_embs.npy"),  mmap_mode="r")
         self.masks = np.load(os.path.join(data_dir, "lora_masks.npy"), mmap_mode="r")
+        captions_path = os.path.join(data_dir, "captions.json")
+        self.captions = None
+        if os.path.exists(captions_path):
+            with open(captions_path, "r", encoding="utf-8") as f:
+                self.captions = json.load(f)
+            if len(self.captions) != len(self.imgs):
+                raise RuntimeError(
+                    f"{captions_path} has {len(self.captions)} captions for {len(self.imgs)} images"
+                )
         assert len(self.imgs) == len(self.embs) == len(self.masks)
         # sanity check: catch all-zeros from a failed precompute run
         sample = self.embs[:min(4, len(self.embs))]
@@ -85,9 +97,37 @@ class LoraDataset(Dataset):
 
     def __getitem__(self, idx):
         img  = torch.from_numpy(self.imgs[idx].astype(np.float32))   # [3, H, H]
-        emb  = torch.from_numpy(self.embs[idx].astype(np.float32))   # [300, 2304]
         mask = torch.from_numpy(self.masks[idx].astype(np.float32))  # [300]
-        return img, emb, mask
+        return idx, img, mask  # return idx so we can look up learnable embeddings
+
+
+# ---- Learnable Embeddings ---------------------------------------------------
+
+class LearnableEmbeddings(nn.Module):
+    """Wrapper to make embeddings learnable parameters during training."""
+    def __init__(self, embeddings: torch.Tensor):
+        super().__init__()
+        # embeddings: [N, 300, 2304] float32
+        self.embs = nn.Parameter(embeddings)
+
+    def forward(self, indices: torch.Tensor):
+        """Return embeddings for given indices. indices: [B]"""
+        return self.embs[indices]  # [B, 300, 2304]
+
+
+def encode_gemma_batch(text_encoder, tokenizer, captions, device):
+    toks = tokenizer(
+        captions,
+        max_length=_TXT_MAX,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+    ).to(device)
+    emb = text_encoder(
+        input_ids=toks.input_ids,
+        attention_mask=toks.attention_mask,
+    ).last_hidden_state
+    return emb[:, _SELECT_IDX, :]
 
 
 # ---- Main -------------------------------------------------------------------
@@ -103,6 +143,17 @@ def main():
     ap.add_argument("--lr",      type=float, default=1e-4)
     ap.add_argument("--lora_r",  type=int,   default=16)
     ap.add_argument("--lora_alpha", type=int, default=16)
+    ap.add_argument("--train_text_encoder", action="store_true",
+                    help="train a Gemma LoRA together with the PixelDiT transformer LoRA")
+    ap.add_argument("--text_encoder_model", default=_GEMMA_ID, help="Gemma model id/path")
+    ap.add_argument("--text_device", default=None,
+                    help="device for Gemma LoRA training; default follows --device")
+    ap.add_argument("--text_lora_r", type=int, default=8)
+    ap.add_argument("--text_lora_alpha", type=int, default=8)
+    ap.add_argument("--text_lora_targets", default="q_proj,k_proj,v_proj,o_proj",
+                    help="comma-separated Gemma module names for PEFT LoRA")
+    ap.add_argument("--text_lr", type=float, default=None,
+                    help="Gemma LoRA LR; default is lr * 0.25")
     ap.add_argument("--cfg_drop", type=float, default=0.1, help="CFG dropout probability")
     ap.add_argument("--device",  default="cuda:0")
     ap.add_argument("--save_every", type=int, default=10)
@@ -118,6 +169,7 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     device = torch.device(args.device)
+    text_device = torch.device(args.text_device if args.text_device else args.device)
 
     # 1. Load model + inject LoRA
     print("Loading PixelDiTModel...")
@@ -147,6 +199,9 @@ def main():
         print("[+] Gradient checkpointing enabled")
 
     model = model.to(device).train()
+    print(f"[devices] PixelDiT={device}  Gemma={text_device if args.train_text_encoder else 'off'}")
+    text_encoder = None
+    tokenizer = None
 
     # null embedding for CFG dropout — zeros
     null_emb  = torch.zeros(1, 300, 2304, device=device)
@@ -159,11 +214,57 @@ def main():
                          num_workers=2, pin_memory=True, drop_last=True)
     print(f"Dataset: {len(dataset)} samples  img_size={img_size}  batch={args.batch}  accum={args.accum}  steps/epoch={len(loader)}")
 
+    # 2b. Text conditioning path
+    learnable_embs = None
+    opt_groups = [{"params": [p for p in model.parameters() if p.requires_grad]}]
+
+    if args.train_text_encoder:
+        if dataset.meta.get("encoder") not in (None, "gemma"):
+            raise RuntimeError("--train_text_encoder requires a Gemma precompute cache")
+        if dataset.captions is None:
+            raise RuntimeError(
+                "--train_text_encoder requires captions.json. "
+                "Re-run scripts/precompute_lora_data.py with this patched version."
+            )
+        print("Loading Gemma text encoder + LoRA...")
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+
+        tokenizer = AutoTokenizer.from_pretrained(args.text_encoder_model)
+        tokenizer.padding_side = "right"
+        text_encoder = (
+            AutoModelForCausalLM.from_pretrained(
+                args.text_encoder_model, torch_dtype=torch.bfloat16
+            )
+            .get_decoder()
+        )
+        if hasattr(text_encoder, "config"):
+            text_encoder.config.use_cache = False
+        text_lora_cfg = LoraConfig(
+            r=args.text_lora_r,
+            lora_alpha=args.text_lora_alpha,
+            target_modules=[m.strip() for m in args.text_lora_targets.split(",") if m.strip()],
+            lora_dropout=0.05,
+            bias="none",
+        )
+        text_encoder = get_peft_model(text_encoder, text_lora_cfg)
+        if args.grad_ckpt and hasattr(text_encoder, "gradient_checkpointing_enable"):
+            text_encoder.gradient_checkpointing_enable()
+            text_encoder.enable_input_require_grads()
+        text_encoder = text_encoder.to(text_device).train()
+        text_encoder.print_trainable_parameters()
+        opt_groups.append({
+            "params": [p for p in text_encoder.parameters() if p.requires_grad],
+            "lr": args.text_lr if args.text_lr is not None else args.lr * 0.25,
+        })
+    else:
+        print("Loading embeddings as learnable parameters...")
+        all_embs = torch.from_numpy(dataset.embs[:].astype(np.float32))
+        learnable_embs = LearnableEmbeddings(all_embs).to(device)
+        print(f"  {learnable_embs.embs.numel()} embedding params")
+        opt_groups.append({"params": learnable_embs.parameters(), "lr": args.lr * 0.1})
+
     # 3. Optimizer
-    opt   = torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=args.lr, weight_decay=1e-2
-    )
+    opt = torch.optim.AdamW(opt_groups, lr=args.lr, weight_decay=1e-2)
     total_steps = args.epochs * len(loader) // args.accum
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=total_steps, eta_min=args.lr * 0.1)
 
@@ -175,7 +276,13 @@ def main():
     step = 0
 
     def save_lora(path, loss):
-        model.save_pretrained(path)
+        os.makedirs(path, exist_ok=True)
+        transformer_dir = os.path.join(path, "transformer")
+        model.save_pretrained(transformer_dir)
+        if text_encoder is not None:
+            text_encoder.save_pretrained(os.path.join(path, "text_encoder"))
+        if learnable_embs is not None:
+            torch.save(learnable_embs.state_dict(), os.path.join(path, "learnable_embs.pt"))
         meta = {
             "data_dir": args.data,
             "model": args.model,
@@ -191,6 +298,14 @@ def main():
             "timestep_logit_std": args.timestep_logit_std,
             "loss_weighting": args.loss_weighting,
             "loss": loss,
+            "has_learnable_embeddings": learnable_embs is not None,
+            "has_text_encoder_lora": text_encoder is not None,
+            "text_encoder_model": args.text_encoder_model if text_encoder is not None else None,
+            "text_device": str(text_device) if text_encoder is not None else None,
+            "text_lora_r": args.text_lora_r if text_encoder is not None else None,
+            "text_lora_alpha": args.text_lora_alpha if text_encoder is not None else None,
+            "text_lora_targets": args.text_lora_targets if text_encoder is not None else None,
+            "text_lr": args.text_lr if args.text_lr is not None else args.lr * 0.25,
             "precompute": dataset.meta,
         }
         with open(os.path.join(path, "training_meta.json"), "w", encoding="utf-8") as f:
@@ -201,15 +316,23 @@ def main():
         bar = tqdm(loader, desc=f"epoch {epoch+1}/{args.epochs}")
         opt.zero_grad()
 
-        for i, (imgs, embs, _masks) in enumerate(bar):
-            imgs = imgs.to(device)   # [B, 3, H, H]
-            embs = embs.to(device)   # [B, 300, 2304]
+        for i, (indices, imgs, _masks) in enumerate(bar):
+            indices = indices.to(device)  # [B] batch indices
+            imgs = imgs.to(device)        # [B, 3, H, H]
             B    = imgs.shape[0]
+
+            if text_encoder is not None:
+                batch_captions = [dataset.captions[int(idx)] for idx in indices.detach().cpu().tolist()]
+                with torch.autocast(device_type=text_device.type, dtype=torch.bfloat16):
+                    embs = encode_gemma_batch(text_encoder, tokenizer, batch_captions, text_device)
+                embs = embs.to(device)
+            else:
+                embs = learnable_embs(indices)
 
             # CFG dropout: replace some embeddings with the null (empty) embedding
             if args.cfg_drop > 0:
-                drop = torch.rand(B, device=device) < args.cfg_drop
-                embs[drop] = null_emb.expand(drop.sum(), -1, -1)
+                drop = (torch.rand(B, device=device) < args.cfg_drop).view(B, 1, 1)
+                embs = torch.where(drop, null_emb.expand(B, -1, -1).to(embs.dtype), embs)
 
             # Logit-normal timestep sampling — concentrates gradient signal
             # around mid-noise where the model does the most meaningful work.
@@ -238,7 +361,12 @@ def main():
             n += 1
 
             if (i + 1) % args.accum == 0:
-                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                all_params = [p for p in model.parameters() if p.requires_grad]
+                if text_encoder is not None:
+                    all_params += [p for p in text_encoder.parameters() if p.requires_grad]
+                if learnable_embs is not None:
+                    all_params += list(learnable_embs.parameters())
+                nn.utils.clip_grad_norm_(all_params, 1.0)
                 opt.step()
                 sched.step()
                 opt.zero_grad()
@@ -248,7 +376,12 @@ def main():
 
         # apply gradients from any tail batches that didn't fill a full accum window
         if n % args.accum != 0:
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            all_params = [p for p in model.parameters() if p.requires_grad]
+            if text_encoder is not None:
+                all_params += [p for p in text_encoder.parameters() if p.requires_grad]
+            if learnable_embs is not None:
+                all_params += list(learnable_embs.parameters())
+            nn.utils.clip_grad_norm_(all_params, 1.0)
             opt.step()
             sched.step()
             opt.zero_grad()
@@ -267,16 +400,21 @@ def main():
             print(f"  best saved → {args.out}/best/")
 
         if is_save or is_best or is_last:
-            save_lora(os.path.join(args.out, "latest"), avg)
+            ckpt_name = f"ckpt_epoch_{epoch+1:03d}"
+            save_lora(os.path.join(args.out, ckpt_name), avg)
+            print(f"  checkpoint → {args.out}/{ckpt_name}/")
 
     print(f"\nDone. Best loss: {best_loss:.4f}")
-    print(f"LoRA saved to {args.out}/")
+    print(f"LoRA checkpoints saved to {args.out}/")
+    print("\nEach checkpoint contains:")
+    print("  transformer/adapter_model.safetensors - PixelDiT transformer LoRA")
+    if args.train_text_encoder:
+        print("  text_encoder/adapter_model.safetensors - Gemma text-encoder LoRA")
+    else:
+        print("  learnable_embs.pt - fine-tuned per-image embeddings [N, 300, 2304]")
+    print("  training_meta.json - metadata")
     print("\nTo use in inference:")
-    print("  pipe.load_lora_weights(")
-    print(f'      "{args.out}/best", weight_name="adapter_model.safetensors", adapter_name="corrychase"')
-    print("  )")
-    print("  pipe.set_adapters([\"corrychase\"], adapter_weights=[2.0])")
-    print("  # prompt with the exact trained trigger: corrychase")
+    print(f"  python generate.py --prompt 'corrychase, your prompt here' --lora {args.out}/best --device {args.device}")
 
 
 if __name__ == "__main__":

@@ -176,3 +176,8 @@ See `howto_lora.md` for the full LoRA training walkthrough.
 - **Original model & all credit**: [NVIDIA Research](https://huggingface.co/nvidia/PixelDiT-1300M-1024px)
 - **Paper**: *PixelDiT: Pixel-Space Diffusion Transformers for Text-to-Image Generation* — NVIDIA
 - **This repo**: unofficial diffusers conversion, Qwen integration, LoRA tooling only
+
+
+upscale_factor = 2
+denoise_strength = 0.03
+controlnet_scale = 0.8

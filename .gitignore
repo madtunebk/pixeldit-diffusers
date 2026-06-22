@@ -1,5 +1,5 @@
 pixeldit-diffusers/
-output/*
+output/
 *.pt
 *.pth
 *.safetensors
@@ -19,5 +19,12 @@ cache/
 PixelDiT/
 space/
 notebooks/
-scripts/nonshare/
+scripts/*
 experiments/
+videos/
+test/
+SANA/
+AGENTS.md
+pixeldit-space/
+PixelDiT/
+basic.app.py

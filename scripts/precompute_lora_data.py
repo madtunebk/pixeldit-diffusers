@@ -36,17 +36,6 @@ _GEMMA_ID   = "Efficient-Large-Model/gemma-2-2b-it"
 _QWEN_VL_ID = "Qwen/Qwen2.5-VL-3B-Instruct"
 _TXT_MAX    = 300
 
-_CHI_PROMPT = "\n".join([
-    'Given a user prompt, generate an "Enhanced prompt" that provides detailed visual descriptions suitable for image generation. Evaluate the level of detail in the user prompt:',
-    '- If the prompt is simple, focus on adding specifics about colors, shapes, sizes, textures, and spatial relationships to create vivid and concrete scenes.',
-    '- If the prompt is already detailed, refine and enhance the existing details slightly without overcomplicating.',
-    'Here are examples of how to transform or refine prompts:',
-    '- User Prompt: A cat sleeping -> Enhanced: A small, fluffy white cat curled up in a round shape, sleeping peacefully on a warm sunny windowsill, surrounded by pots of blooming red flowers.',
-    '- User Prompt: A busy city street -> Enhanced: A bustling city street scene at dusk, featuring glowing street lamps, a diverse crowd of people in colorful clothing, and a double-decker bus passing by towering glass skyscrapers.',
-    'Please generate only the enhanced description for the prompt below and avoid including any additional commentary or evaluations:',
-    'User Prompt: ',
-])
-
 def make_img_transform(size: int):
     return T.Compose([
         T.Lambda(lambda img: img.convert("RGB")),
@@ -82,7 +71,7 @@ def clean_caption(text):
     return text.strip(" ,.")
 
 
-def recaption(img_paths, device, focus=None, trigger=None, caption_style="prompt"):
+def recaption(img_paths, device, focus=None, trigger=None, caption_style="prompt", max_pixels=262144):
     from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
     from qwen_vl_utils import process_vision_info
 
@@ -138,7 +127,7 @@ def recaption(img_paths, device, focus=None, trigger=None, caption_style="prompt
         messages = [
             {"role": "system", "content": system_text},
             {"role": "user", "content": [
-                {"type": "image", "image": str(img_path)},
+                {"type": "image", "image": str(img_path), "max_pixels": max_pixels},
                 {"type": "text",  "text": user_text},
             ]}
         ]
@@ -166,15 +155,13 @@ def encode_gemma(captions, device, batch=32):
     tok.padding_side = "right"
     model = (AutoModelForCausalLM.from_pretrained(_GEMMA_ID, torch_dtype=torch.bfloat16)
              .get_decoder().eval().to(device))
-    num_chi = len(tok.encode(_CHI_PROMPT))
-    max_len = num_chi + _TXT_MAX - 2
-    select  = [0] + list(range(-(_TXT_MAX - 1), 0))
+    select = [0] + list(range(-(_TXT_MAX - 1), 0))
 
     all_embs, all_masks = [], []
-    print("Encoding with Gemma...")
+    print("Encoding with Gemma (no chi_prompt)...")
     for i in tqdm(range(0, len(captions), batch), desc="encoding"):
-        batch_caps = [_CHI_PROMPT + c for c in captions[i:i+batch]]
-        t = tok(batch_caps, max_length=max_len, padding="max_length",
+        batch_caps = captions[i:i+batch]
+        t = tok(batch_caps, max_length=_TXT_MAX, padding="max_length",
                 truncation=True, return_tensors="pt").to(device)
         with torch.no_grad():
             emb = model(t.input_ids, attention_mask=t.attention_mask).last_hidden_state
@@ -206,15 +193,13 @@ def encode_qwen(captions, proj_path, device, batch=32):
     else:
         raise RuntimeError(f"qwen_proj.pt not found at {proj_path} — run train_qwen_proj.py first")
 
-    num_chi = len(qtok.encode(_CHI_PROMPT))
-    max_len = num_chi + _TXT_MAX - 2
     select  = [0] + list(range(-(_TXT_MAX - 1), 0))
 
     all_embs, all_masks = [], []
-    print("Encoding with Qwen+projection...")
+    print("Encoding with Qwen+projection (no chi_prompt)...")
     for i in tqdm(range(0, len(captions), batch), desc="encoding"):
-        batch_caps = [_CHI_PROMPT + c for c in captions[i:i+batch]]
-        t = qtok(batch_caps, max_length=max_len, padding="max_length",
+        batch_caps = captions[i:i+batch]
+        t = qtok(batch_caps, max_length=_TXT_MAX, padding="max_length",
                  truncation=True, return_tensors="pt").to(device)
         with torch.no_grad():
             emb = qmodel(**t).last_hidden_state
@@ -256,6 +241,8 @@ def main():
     ap.add_argument("--proj",       default="qwen_proj.pt", help="path to qwen_proj.pt (only for --encoder qwen)")
     ap.add_argument("--device",     default="cuda:0", help="device for text encoder")
     ap.add_argument("--vl-device",  default=None,     help="device for Qwen2.5-VL captioning (default: same as --device)")
+    ap.add_argument("--vl-max-pixels", type=int, default=262144,
+                    help="max pixels sent to Qwen2.5-VL for recaptioning; lower if CUDA OOM")
     ap.add_argument("--batch",      type=int, default=16)
     args = ap.parse_args()
 
@@ -284,7 +271,8 @@ def main():
     # 2. get captions
     if args.recaption:
         captions = recaption(
-            img_paths, vl_device, focus=args.focus, trigger=args.trigger, caption_style=args.caption_style
+            img_paths, vl_device, focus=args.focus, trigger=args.trigger,
+            caption_style=args.caption_style, max_pixels=args.vl_max_pixels
         )
     else:
         captions = []
@@ -318,7 +306,10 @@ def main():
     # 5. verify — catch silent zero-fill bugs immediately
     verify_embeddings(embs_mm, "lora_embs")
 
-    # 6. save metadata
+    # 6. save metadata and captions for optional text-encoder LoRA training
+    with open(f"{args.out}/captions.json", "w", encoding="utf-8") as f:
+        json.dump(captions, f, indent=2)
+
     meta = {
         "encoder": args.encoder,
         "n_samples": N,
@@ -329,6 +320,7 @@ def main():
         "recaption": args.recaption,
         "focus": args.focus,
         "caption_style": args.caption_style,
+        "vl_max_pixels": args.vl_max_pixels if args.recaption else None,
         "images_dir": args.images,
         "caption_example": captions[0] if captions else None,
     }

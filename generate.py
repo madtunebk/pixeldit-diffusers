@@ -6,8 +6,8 @@ import torch
 # ── Settings (edit these to run without CLI args) ─────────────────────────────
 PROMPT        = None          # None → runs the built-in batch of fun prompts
 NEGATIVE      = "blurry, low quality, deformed, duplicate buildings, bad anatomy, cropped, text, watermark, oversaturated, low detail, noisy, distorted perspective"
-ENCODER       = "gemma"       # "gemma" | "qwen"
-PROJ          = None          # path to qwen_proj.pt  (required when ENCODER="qwen")
+ENCODER       = "gemma"       # "gemma" | "qwen" | "siglip"
+PROJ          = None          # path to qwen_proj.pt / siglip_proj.pt (required for qwen/siglip)
 HEIGHT        = 1024
 WIDTH         = 1024
 STEPS         = 50            # minimum 45 — below that output is garbage
@@ -34,7 +34,17 @@ PROMPTS = [
 ]
 
 
-def load_pipeline(encoder, proj, device, lora, scheduler):
+def _adapter_dir(path, component):
+    if not path:
+        return None
+    component_dir = os.path.join(path, component)
+    if os.path.exists(os.path.join(component_dir, "adapter_config.json")):
+        return component_dir
+    if component == "transformer" and os.path.exists(os.path.join(path, "adapter_config.json")):
+        return path
+    return None
+
+def load_pipeline(encoder, proj, device, lora, scheduler, lora_scale=1.0, lora_component="all"):
     from transformers import AutoTokenizer, AutoModelForCausalLM
     from diffusers.pipelines.pixeldit import PixelDiTPipeline, PixelDiTModel
 
@@ -58,12 +68,41 @@ def load_pipeline(encoder, proj, device, lora, scheduler):
 
     if lora:
         print(f"[+] Loading LoRA from {lora}...")
-        pipe.load_lora_weights(lora)
+        transformer_lora = _adapter_dir(lora, "transformer")
+        text_lora = _adapter_dir(lora, "text_encoder")
+
+        if lora_component in ("all", "transformer"):
+            if transformer_lora:
+                pipe.load_lora_weights(transformer_lora)
+                if lora_scale != 1.0:
+                    set_lora_scale(pipe, lora_scale)
+                    print(f"[+] PixelDiT LoRA scale -> {lora_scale}")
+            else:
+                print(f"[!] No PixelDiT transformer adapter found under {lora}")
+        else:
+            print("[+] Skipping PixelDiT transformer LoRA")
+
+        if lora_component in ("all", "text_encoder") and text_lora:
+            if encoder == "gemma":
+                from peft import PeftModel
+                pipe.text_encoder = PeftModel.from_pretrained(
+                    pipe.text_encoder, text_lora, is_trainable=False
+                ).eval()
+                print("[+] Loaded Gemma text-encoder LoRA")
+            else:
+                print("[!] Gemma text-encoder LoRA present but encoder=qwen; skipping it")
+        elif lora_component in ("all", "text_encoder"):
+            print(f"[!] No Gemma text-encoder adapter found under {lora}")
 
     if encoder == "qwen":
         from diffusers.pipelines.pixeldit import QwenEncoder
         print("[+] Swapping to Qwen text encoder...")
         pipe.text_encoder = QwenEncoder(proj_path=proj, output_device=device)
+
+    if encoder == "siglip":
+        from diffusers.pipelines.pixeldit.text_encoder_siglip import SiglipEncoder
+        print("[+] Swapping to SigLIP text encoder...")
+        pipe.text_encoder = SiglipEncoder(proj_path=proj, output_device=device)
 
     if scheduler != "euler":
         from diffusers import FlowMatchHeunDiscreteScheduler, FlowMatchLCMScheduler
@@ -75,11 +114,15 @@ def load_pipeline(encoder, proj, device, lora, scheduler):
     return pipe
 
 
-def run_pipe(pipe, prompt, negative_prompt, height, width, steps, cfg, seed, lora_scale):
-    kwargs = {}
-    if lora_scale != 1.0:
-        kwargs["cross_attention_kwargs"] = {"scale": lora_scale}
+def set_lora_scale(pipe, scale):
+    """Scale transformer LoRA strength. 1.0 = full, 0.5 = subtle, 1.5 = aggressive."""
+    from peft.tuners.lora.layer import LoraLayer
+    for module in pipe.transformer.modules():
+        if isinstance(module, LoraLayer):
+            module.scale_layer(scale)
 
+
+def run_pipe(pipe, prompt, negative_prompt, height, width, steps, cfg, seed):
     out = pipe(
         prompt,
         negative_prompt=negative_prompt,
@@ -88,7 +131,6 @@ def run_pipe(pipe, prompt, negative_prompt, height, width, steps, cfg, seed, lor
         num_inference_steps=steps,
         guidance_scale=cfg,
         generator=torch.Generator("cpu").manual_seed(seed),
-        **kwargs,
     )
     return out.images[0]
 
@@ -97,24 +139,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prompt",          default=PROMPT)
     ap.add_argument("--negative_prompt", default=NEGATIVE)
-    ap.add_argument("--encoder",         default=ENCODER,    choices=["gemma", "qwen"])
-    ap.add_argument("--proj",            default=PROJ,       help="qwen_proj.pt path")
+    ap.add_argument("--encoder",         default=ENCODER,    choices=["gemma", "qwen", "siglip"])
+    ap.add_argument("--proj",            default=PROJ,       help="qwen_proj.pt / siglip_proj.pt path")
     ap.add_argument("--height",  type=int,   default=HEIGHT)
     ap.add_argument("--width",   type=int,   default=WIDTH)
     ap.add_argument("--steps",   type=int,   default=STEPS)
     ap.add_argument("--cfg",     type=float, default=CFG)
     ap.add_argument("--seed",    type=int,   default=SEED)
     ap.add_argument("--out",                 default=OUT)
+    ap.add_argument("--save",                default=None,   help="exact output file path (overrides --out)")
     ap.add_argument("--device",              default=DEVICE)
     ap.add_argument("--lora",                default=LORA,       help="LoRA adapter folder")
     ap.add_argument("--lora_scale", type=float, default=LORA_SCALE)
+    ap.add_argument("--lora_component", default="all", choices=["all", "transformer", "text_encoder"],
+                    help="which adapter component to load from --lora")
     ap.add_argument("--scheduler",           default=SCHEDULER,  choices=["euler", "heun", "lcm"])
     args = ap.parse_args()
 
     seed = args.seed if args.seed is not None else random.randint(0, 2**32 - 1)
     os.makedirs(args.out, exist_ok=True)
 
-    pipe = load_pipeline(args.encoder, args.proj, args.device, args.lora, args.scheduler)
+    pipe = load_pipeline(
+        args.encoder, args.proj, args.device, args.lora, args.scheduler,
+        args.lora_scale, args.lora_component,
+    )
 
     print(f"  seed: {seed}  (--seed {seed} to reproduce)")
     prompts = [args.prompt] if args.prompt else PROMPTS
@@ -123,10 +171,14 @@ def main():
         print(f"\n[gen] [{i+1}/{len(prompts)}] {prompt[:80]}")
         img = run_pipe(
             pipe, prompt, args.negative_prompt,
-            args.height, args.width, args.steps, args.cfg, seed, args.lora_scale,
+            args.height, args.width, args.steps, args.cfg, seed,
         )
-        safe = prompt[:50].replace(" ", "_").replace(",", "").replace("'", "")
-        fname = os.path.join(args.out, f"{i:02d}_{safe}.jpg")
+        if args.save and len(prompts) == 1:
+            fname = args.save
+            os.makedirs(os.path.dirname(os.path.abspath(fname)), exist_ok=True)
+        else:
+            safe = prompt[:50].replace(" ", "_").replace(",", "").replace("'", "")
+            fname = os.path.join(args.out, f"{i:02d}_{safe}.jpg")
         img.save(fname)
         print(f"  saved → {fname}")
 
