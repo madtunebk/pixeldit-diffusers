@@ -24,6 +24,17 @@ All credit for the model architecture and weights goes to NVIDIA Research. This 
 
 ---
 
+## Gallery — IP-Adapter style transfer (SigLIP only, no text prompt)
+
+| | | | | |
+|---|---|---|---|---|
+| ![](assets/gallery/01_cyber_soldier.jpg) | ![](assets/gallery/02_neon_goth.jpg) | ![](assets/gallery/03_demon_queen.jpg) | ![](assets/gallery/04_punk_girl.jpg) | ![](assets/gallery/05_void_entity.jpg) |
+| ![](assets/gallery/06_rain_alley.jpg) | ![](assets/gallery/07_ink_mask.jpg) | ![](assets/gallery/08_retro_city.jpg) | ![](assets/gallery/09_dream_goddess.jpg) | ![](assets/gallery/10_cosmic_entity.jpg) |
+
+> All generated with [`madtune/pixeldit-controlnet`](https://huggingface.co/madtune/pixeldit-controlnet) — IP-Adapter only, zero text conditioning.
+
+---
+
 ## What is PixelDiT?
 
 PixelDiT is a 1.3B parameter **pixel-space** diffusion transformer — no VAE, generates images directly in pixel space. Runs on **4GB VRAM**.
@@ -115,8 +126,3 @@ Three nodes under **PixelDiT** category:
 - **Original model & all credit**: [NVIDIA Research](https://huggingface.co/nvidia/PixelDiT-1300M-1024px)
 - **Paper**: *PixelDiT: Pixel-Space Diffusion Transformers for Text-to-Image Generation* — NVIDIA
 - **This repo**: unofficial diffusers conversion, Qwen integration, LoRA tooling only
-
-
-upscale_factor = 2
-denoise_strength = 0.03
-controlnet_scale = 0.8
