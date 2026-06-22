@@ -7,6 +7,8 @@ output/
 *.jpeg
 *.png
 !assets/banner.png
+!assets/gallery/*.jpg
+!assets/gallery/*.png
 __pycache__/
 *.pyc
 .venv/
